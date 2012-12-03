@@ -16,9 +16,6 @@
     window = freeGlobal;
   }
 
-  /** Document shortcut used by `createFunction` */
-  var document = window.document;
-
   /** Used for array and object method references */
   var arrayRef = [],
       // avoid a Closure Compiler bug by creatively creating an object
@@ -95,7 +92,6 @@
       hasOwnProperty = objectRef.hasOwnProperty,
       push = arrayRef.push,
       propertyIsEnumerable = objectRef.propertyIsEnumerable,
-      slice = arrayRef.slice,
       toString = objectRef.toString;
 
   /* Native method shortcuts for methods with the same name as other `lodash` methods */
@@ -118,6 +114,17 @@
       objectClass = '[object Object]',
       regexpClass = '[object RegExp]',
       stringClass = '[object String]';
+
+  /** Detect various environments */
+  var isFirefox = !/1/.test(Function('1')),
+      isIeOpera = !!window.attachEvent,
+      isV8 = nativeBind && !/\n|true/.test(nativeBind + isIeOpera);
+
+  /* Detect if `Function#bind` exists and is inferred to be fast (all but V8) */
+  var isBindFast = nativeBind && !isV8;
+
+  /* Detect if `Object.keys` exists and is inferred to be fast (IE, Opera, V8) */
+  var isKeysFast = nativeKeys && (isIeOpera || isV8);
 
   /**
    * Detect the JScript [[DontEnum]] bug:
@@ -174,20 +181,14 @@
    * a string without a `toString` property value of `typeof` "function".
    */
   try {
-    var noNodeClass = ({ 'toString': 0 } + '', toString.call(document || 0) == objectClass);
+    var noNodeClass = ({ 'toString': 0 } + '', toString.call(document) == objectClass);
   } catch(e) { }
-
-  /* Detect if `Function#bind` exists and is inferred to be fast (all but V8) */
-  var isBindFast = nativeBind && /\n|Opera/.test(nativeBind + toString.call(window.opera));
-
-  /* Detect if `Object.keys` exists and is inferred to be fast (IE, Opera, V8) */
-  var isKeysFast = nativeKeys && /^.+$|true/.test(nativeKeys + !!window.attachEvent);
 
   /**
    * Detect if sourceURL syntax is usable without erroring:
    *
-   * The JS engine in Adobe products, like InDesign, will throw a syntax error
-   * when it encounters a single line comment beginning with the `@` symbol.
+   * The JS engine embedded in Adobe products will throw a syntax error when
+   * it encounters a single line comment beginning with the `@` symbol.
    *
    * The JS engine in Narwhal will generate the function `function anonymous(){//}`
    * and throw a syntax error.
@@ -197,7 +198,7 @@
    * http://msdn.microsoft.com/en-us/library/121hztk3(v=vs.94).aspx
    */
   try {
-    var useSourceURL = (Function('//@')(), !window.attachEvent);
+    var useSourceURL = (Function('//@')(), !isIeOpera);
   } catch(e) { }
 
   /** Used to identify object classifications that `_.clone` supports */
@@ -320,37 +321,13 @@
    * @param {String} body The function body.
    * @returns {Function} The new function.
    */
-  var createFunction = function(args, body) {
-    var error,
-        onerror = window.onerror,
-        prevDash = window._,
-        script = document.createElement('script'),
-        sibling = document.scripts[0];
-
-    // use script injection to avoid Firefox's unoptimized `Function` constructor
-    // http://bugzil.la/804933
-    window.onerror = function(message) {
-      error = message;
-      return true;
-    };
+  function createFunction(args, body) {
     // the newline, in `'\n}'`, is required to avoid errors if `body` ends
     // with a single line comment
-    script.text = 'var _ = function(' + args + ') {' + body + '\n}';
-    sibling.parentNode.insertBefore(script, sibling).parentNode.removeChild(script);
-
-    var result = window._;
-    window._ = prevDash;
-    window.onerror = onerror;
-
-    if (error) {
-      throw new SyntaxError(error);
-    }
-    return result;
-  };
-
-  try {
-    createFunction();
-  } catch(e) {
+    return window.eval('(function(' + args + ') {' + body + '\n})');
+  }
+  // use script injection if Firefox's script engine is detected
+  if (isIeOpera || isV8 || !isFirefox) {
     createFunction = Function;
   }
 
@@ -606,22 +583,22 @@
       }
       if (partialArgs.length) {
         args = args.length
-          ? partialArgs.concat(slice.call(args))
+          ? partialArgs.concat(slice(args))
           : partialArgs;
       }
       if (this instanceof bound) {
-        // get `func` instance if `bound` is invoked in a `new` expression
-        noop.prototype = func.prototype;
-        thisBinding = new noop;
-
         // mimic the constructor's `return` behavior
         // http://es5.github.com/#x13.2.2
-        var result = func.apply(thisBinding, args);
-        return isObject(result)
-          ? result
-          : thisBinding
+        var result = func.apply(this, args);
+        return isObject(result) ? result : this;
       }
       return func.apply(thisBinding, args);
+    }
+    if (func && func.prototype) {
+      // ensure `new bound` is an instance of `bound` and `func`
+      noop.prototype = func.prototype;
+      bound.prototype = new noop;
+      noop.prototype = null;
     }
     return bound;
   }
@@ -746,6 +723,34 @@
    */
   function noop() {
     // no operation performed
+  }
+
+  /**
+   * Slices the `collection` from the `start` index up to, but not including,
+   * the `end` index.
+   *
+   * Note: This function is used, instead of `Array#slice`, to support node lists
+   * in IE < 9 and to ensure dense arrays are returned.
+   *
+   * @private
+   * @param {Array|Object|String} collection The collection to slice.
+   * @param {Number} start The start index.
+   * @param {Number} end The end index.
+   * @returns {Array} Returns the new array.
+   */
+  function slice(array, start, end) {
+    start || (start = 0);
+    if (typeof end == 'undefined') {
+      end = array ? array.length : 0;
+    }
+    var index = -1,
+        length = end - start || 0,
+        result = Array(length < 0 ? 0 : length);
+
+    while (++index < length) {
+      result[index] = array[start + index];
+    }
+    return result;
   }
 
   /**
@@ -939,10 +944,13 @@
 
   /**
    * Creates a clone of `value`. If `deep` is `true`, all nested objects will
-   * also be cloned otherwise they will be assigned by reference. Functions and
+   * also be cloned, otherwise they will be assigned by reference. Functions and
    * DOM nodes are **not** cloned. The enumerable properties of `arguments` objects
    * and objects created by constructors other than `Object` are cloned to plain
    * Object objects.
+   *
+   * Note: Lo-Dash's deep clone functionality is loosely based on the structured clone algorithm.
+   * See http://www.w3.org/TR/html5/common-dom-interfaces.html#internal-structured-cloning-algorithm.
    *
    * @static
    * @memberOf _
@@ -993,7 +1001,7 @@
     // shallow clone
     if (!isObj || !deep) {
       return isObj
-        ? (isArr ? slice.call(value) : assign({}, value))
+        ? (isArr ? slice(value) : assign({}, value))
         : value;
     }
     var ctor = ctorByClass[className];
@@ -1032,6 +1040,15 @@
       result[key] = clone(objValue, deep, null, stackA, stackB);
     });
 
+    // add array properties assigned by `RegExp#exec`
+    if (isArr) {
+      if (hasOwnProperty.call(value, 'index')) {
+        result.index = value.index;
+      }
+      if (hasOwnProperty.call(value, 'input')) {
+        result.input = value.input;
+      }
+    }
     return result;
   }
 
@@ -1356,19 +1373,24 @@
       }
       return result;
     }
-    // deep compare objects
-    forOwn(a, function(value, key) {
-      // count the number of properties.
-      size++;
-      // deep compare each property value.
-      return (result = hasOwnProperty.call(b, key) && isEqual(value, b[key], stackA, stackB));
+    // deep compare objects using `forIn`, instead of `forOwn`, to avoid `Object.keys`
+    // which, in this case, is more costly
+    forIn(a, function(value, key, a) {
+      if (hasOwnProperty.call(a, key)) {
+        // count the number of properties.
+        size++;
+        // deep compare each property value.
+        return (result = hasOwnProperty.call(b, key) && isEqual(value, b[key], stackA, stackB));
+      }
     });
 
     if (result) {
       // ensure both objects have the same number of properties
-      forOwn(b, function() {
-        // `size` will be `-1` if `b` has more properties than `a`
-        return (result = --size > -1);
+      forIn(b, function(value, key, b) {
+        if (hasOwnProperty.call(b, key)) {
+          // `size` will be `-1` if `b` has more properties than `a`
+          return (result = --size > -1);
+        }
       });
     }
     return result;
@@ -2069,7 +2091,7 @@
    * // => alerts each number and returns '1,2,3'
    *
    * _.forEach({ 'one': 1, 'two': 2, 'three': 3 }, alert);
-   * // => alerts each number (order is not guaranteed)
+   * // => alerts each number value (order is not guaranteed)
    */
   var forEach = createIterator(forEachIteratorOptions);
 
@@ -2132,7 +2154,7 @@
    * // => [['1', '2', '3'], ['4', '5', '6']]
    */
   function invoke(collection, methodName) {
-    var args = slice.call(arguments, 2),
+    var args = slice(arguments, 2),
         isFunc = typeof methodName == 'function',
         result = [];
 
@@ -2301,11 +2323,7 @@
    * // => ['moe', 'larry', 'curly']
    */
   function pluck(collection, property) {
-    var result = [];
-    forEach(collection, function(value) {
-      result.push(value[property]);
-    });
-    return result;
+    return map(collection, property + '');
   }
 
   /**
@@ -2539,7 +2557,7 @@
   }
 
   /**
-   * Converts the `collection`, to an array.
+   * Converts the `collection` to an array.
    *
    * @static
    * @memberOf _
@@ -2554,16 +2572,9 @@
   function toArray(collection) {
     var length = collection ? collection.length : 0;
     if (typeof length == 'number') {
-      if (noCharByIndex && isString(collection)) {
-        collection = collection.split('');
-      }
-      var index = -1,
-          result = Array(length);
-
-      while (++index < length) {
-        result[index] = collection[index];
-      }
-      return result;
+      return noCharByIndex && isString(collection)
+        ? collection.split('')
+        : slice(collection);
     }
     return values(collection);
   }
@@ -2677,8 +2688,8 @@
    * @param {Number} [n] The number of elements to return.
    * @param- {Object} [guard] Internally used to allow this method to work with
    *  others like `_.map` without using their callback `index` argument for `n`.
-   * @returns {Mixed} Returns the first element or an array of the first `n`
-   *  elements of `array`.
+   * @returns {Mixed} Returns the first element, or an array of the first `n`
+   *  elements, of `array`.
    * @example
    *
    * _.first([5, 4, 3, 2, 1]);
@@ -2686,7 +2697,10 @@
    */
   function first(array, n, guard) {
     if (array) {
-      return (n == null || guard) ? array[0] : slice.call(array, 0, n);
+      var length = array.length;
+      return (n == null || guard)
+        ? array[0]
+        : slice(array, 0, nativeMin(nativeMax(0, n), length));
     }
   }
 
@@ -2779,16 +2793,19 @@
    * @param {Number} [n=1] The number of elements to exclude.
    * @param- {Object} [guard] Internally used to allow this method to work with
    *  others like `_.map` without using their callback `index` argument for `n`.
-   * @returns {Array} Returns all but the last element or `n` elements of `array`.
+   * @returns {Array} Returns all but the last element, or `n` elements, of `array`.
    * @example
    *
    * _.initial([3, 2, 1]);
    * // => [3, 2]
    */
   function initial(array, n, guard) {
-    return array
-      ? slice.call(array, 0, -((n == null || guard) ? 1 : n))
-      : [];
+    if (!array) {
+      return [];
+    }
+    var length = array.length;
+    n = n == null || guard ? 1 : n || 0;
+    return slice(array, 0, nativeMin(nativeMax(0, length - n), length));
   }
 
   /**
@@ -2837,8 +2854,8 @@
    * @param {Number} [n] The number of elements to return.
    * @param- {Object} [guard] Internally used to allow this method to work with
    *  others like `_.map` without using their callback `index` argument for `n`.
-   * @returns {Mixed} Returns the last element or an array of the last `n`
-   *  elements of `array`.
+   * @returns {Mixed} Returns the last element, or an array of the last `n`
+   *  elements, of `array`.
    * @example
    *
    * _.last([3, 2, 1]);
@@ -2847,7 +2864,7 @@
   function last(array, n, guard) {
     if (array) {
       var length = array.length;
-      return (n == null || guard) ? array[length - 1] : slice.call(array, -n || length);
+      return (n == null || guard) ? array[length - 1] : slice(array, nativeMax(0, length - n));
     }
   }
 
@@ -2979,16 +2996,14 @@
    * @param {Number} [n=1] The number of elements to exclude.
    * @param- {Object} [guard] Internally used to allow this method to work with
    *  others like `_.map` without using their callback `index` argument for `n`.
-   * @returns {Array} Returns all but the first value or `n` values of `array`.
+   * @returns {Array} Returns all but the first element, or `n` elements, of `array`.
    * @example
    *
    * _.rest([3, 2, 1]);
    * // => [2, 1]
    */
   function rest(array, n, guard) {
-    return array
-      ? slice.call(array, (n == null || guard) ? 1 : n)
-      : [];
+    return slice(array, (n == null || guard) ? 1 : nativeMax(0, n));
   }
 
   /**
@@ -3256,7 +3271,7 @@
     // (in V8 `Function#bind` is slower except when partially applied)
     return isBindFast || (nativeBind && arguments.length > 2)
       ? nativeBind.call.apply(nativeBind, arguments)
-      : createBound(func, thisArg, slice.call(arguments, 2));
+      : createBound(func, thisArg, slice(arguments, 2));
   }
 
   /**
@@ -3328,7 +3343,7 @@
    * // => 'hi, moe!'
    */
   function bindKey(object, key) {
-    return createBound(object, key, slice.call(arguments, 2));
+    return createBound(object, key, slice(arguments, 2));
   }
 
   /**
@@ -3428,7 +3443,7 @@
    * // => 'logged later' (Appears after one second.)
    */
   function delay(func, wait) {
-    var args = slice.call(arguments, 2);
+    var args = slice(arguments, 2);
     return setTimeout(function() { func.apply(undefined, args); }, wait);
   }
 
@@ -3448,7 +3463,7 @@
    * // returns from the function before `alert` is called
    */
   function defer(func) {
-    var args = slice.call(arguments, 1);
+    var args = slice(arguments, 1);
     return setTimeout(function() { func.apply(undefined, args); }, 1);
   }
 
@@ -3534,7 +3549,7 @@
    * // => 'hi: moe'
    */
   function partial(func) {
-    return createBound(func, slice.call(arguments, 1));
+    return createBound(func, slice(arguments, 1));
   }
 
   /**
@@ -3638,7 +3653,7 @@
   /**
    * This function returns the first argument passed to it.
    *
-   * Note: It is used throughout Lo-Dash as a default callback.
+   * Note: This function is used throughout Lo-Dash as a default callback.
    *
    * @static
    * @memberOf _
@@ -3881,13 +3896,21 @@
       source += text.slice(index, offset).replace(reUnescapedString, escapeStringChar);
 
       // replace delimiters with snippets
-      source +=
-        escapeValue ? "' +\n__e(" + escapeValue + ") +\n'" :
-        evaluateValue ? "';\n" + evaluateValue + ";\n__p += '" :
-        interpolateValue ? "' +\n((__t = (" + interpolateValue + ")) == null ? '' : __t) +\n'" : '';
-
+      if (escapeValue) {
+        source += "' +\n__e(" + escapeValue + ") +\n'";
+      }
+      if (evaluateValue) {
+        source += "';\n" + evaluateValue + ";\n__p += '";
+      }
+      if (interpolateValue) {
+        source += "' +\n((__t = (" + interpolateValue + ")) == null ? '' : __t) +\n'";
+      }
       isEvaluating || (isEvaluating = evaluateValue || reComplexDelimiter.test(escapeValue || interpolateValue));
       index = offset + match.length;
+
+      // the JS engine embedded in Adobe products requires returning the `match`
+      // string in order to produce the correct `offset` value
+      return match;
     });
 
     source += "';\n";
@@ -4003,22 +4026,23 @@
   }
 
   /**
-   * Generates a unique id. If `prefix` is passed, the id will be appended to it.
+   * Generates a unique ID. If `prefix` is passed, the ID will be appended to it.
    *
    * @static
    * @memberOf _
    * @category Utilities
-   * @param {String} [prefix] The value to prefix the id with.
-   * @returns {Number|String} Returns a numeric id if no prefix is passed, else
-   *  a string id may be returned.
+   * @param {String} [prefix] The value to prefix the ID with.
+   * @returns {String} Returns the unique ID.
    * @example
    *
    * _.uniqueId('contact_');
    * // => 'contact_104'
+   *
+   * _.uniqueId();
+   * // => '105'
    */
   function uniqueId(prefix) {
-    var id = idCounter++;
-    return prefix ? prefix + id : id;
+    return (prefix == null ? '' : prefix + '') + (++idCounter);
   }
 
   /*--------------------------------------------------------------------------*/
@@ -4285,7 +4309,7 @@
 
   // add all methods that return unwrapped values
   forEach(filter(functions(lodash), function(methodName) {
-    return /^(?:contains|every|find|has|is[A-Z].+|reduce.*|some)$/.test(methodName);
+    return /^(?:bind|contains|every|find|has|is[A-Z].+|reduce.*|some)$/.test(methodName);
   }), function(methodName) {
     var func = lodash[methodName];
 

@@ -209,6 +209,14 @@
       bound(['b'], 'c');
       deepEqual(args, ['a', ['b'], 'c']);
     });
+
+    test('ensure `new bound` is an instance of `bound` and `func`', function() {
+      var func = function() {},
+          bound = _.bind(func, {}),
+          instance = new bound;
+
+      ok(instance instanceof bound && instance instanceof func);
+    });
   }());
 
   /*--------------------------------------------------------------------------*/
@@ -293,6 +301,14 @@
           actual = _.map(expected, _.clone);
 
       ok(actual != expected && actual.a == expected.a && actual.b == expected.b);
+    });
+
+    test('should deep clone `index` and `input` array properties', function() {
+      var array = /x/.exec('x'),
+          actual = _.clone(array, true);
+
+      equal(actual.index, 0);
+      equal(actual.input, 'x');
     });
 
     test('should deep clone objects with circular references', function() {
@@ -530,10 +546,10 @@
       expected.push(undefined, undefined, undefined);
 
       deepEqual(actual1, expected);
-      ok('4' in actual1);
+      ok(4 in actual1);
 
       deepEqual(actual2, expected);
-      ok('4' in actual2);
+      ok(4 in actual2);
     });
   }());
 
@@ -722,9 +738,9 @@
   QUnit.module('lodash.initial');
 
   (function() {
-    test('returns an empty collection for `n` of `0`', function() {
+    test('returns a full collection for `n` of `0`', function() {
       var array = [1, 2, 3];
-      deepEqual(_.initial(array, 0), []);
+      deepEqual(_.initial(array, 0), [1, 2, 3]);
     });
 
     test('should allow a falsey `array` argument', function() {
@@ -1625,7 +1641,7 @@
       } catch(e) {
         var source = e.source;
       }
-      ok((source + '').indexOf('__p') > -1);
+      ok(/__p/.test(source));
     });
 
     test('should work with complex "interpolate" delimiters', function() {
@@ -1794,6 +1810,17 @@
   (function() {
     var args = arguments;
 
+    test('should return a dense array', function() {
+      var array = Array(3);
+      array[1] = 2;
+
+      var actual = _.toArray(array);
+
+      ok(0 in actual);
+      ok(2 in actual);
+      deepEqual(actual, array);
+    });
+
     test('should treat array-like objects like arrays', function() {
       var object = { '0': 'a', '1': 'b', '2': 'c', 'length': 3 };
       deepEqual(_.toArray(object), ['a', 'b', 'c']);
@@ -1805,7 +1832,7 @@
       deepEqual(_.toArray(Object('abc')), ['a', 'b', 'c']);
     });
 
-    test('should work with a NodeList for `collection` (test in IE < 9)', function() {
+    test('should work with a node list for `collection` (test in IE < 9)', function() {
       if (window.document) {
         try {
           var nodeList = document.getElementsByTagName('body'),
@@ -1873,6 +1900,21 @@
           actual = _.uniq(expected);
 
       deepEqual(actual, expected);
+    });
+  }());
+
+  /*--------------------------------------------------------------------------*/
+
+  QUnit.module('lodash.uniqueId');
+
+  (function() {
+    test('should return a string value when not passing a prefix argument', function() {
+      equal(typeof _.uniqueId(), 'string');
+    });
+
+    test('should coerce the prefix argument to a string', function() {
+      var actual = [_.uniqueId(3), _.uniqueId(2), _.uniqueId(1)];
+      equal(/3\d+,2\d+,1\d+/.test(actual), true);
     });
   }());
 

@@ -105,7 +105,7 @@
     'isDate': [],
     'isElement': [],
     'isEmpty': ['forOwn', 'isArguments', 'isFunction'],
-    'isEqual': ['forOwn', 'isFunction'],
+    'isEqual': ['forIn', 'isFunction'],
     'isFinite': [],
     'isFunction': [],
     'isNaN': ['isNumber'],
@@ -132,7 +132,7 @@
     'pairs': ['forOwn'],
     'partial': ['isFunction', 'isObject'],
     'pick': ['forIn'],
-    'pluck': ['forEach'],
+    'pluck': ['map'],
     'random': [],
     'range': [],
     'reduce': ['forEach'],
@@ -263,7 +263,7 @@
    * @returns {String} Returns the modified source.
    */
   function addCommandsToHeader(source, commands) {
-    return source.replace(/(\/\*!\n)( \*)?( *Lo-Dash [0-9.]+)(.*)/, function() {
+    return source.replace(/(\/\*!\n)( \*)?( *Lo-Dash [\w.-]+)(.*)/, function() {
       // convert unmatched groups to empty strings
       var parts = _.map(slice.call(arguments, 1), function(part) {
         return part || '';
@@ -645,8 +645,10 @@
    * @returns {String} Returns the modified source.
    */
   function removeCreateFunction(source) {
+    source = removeVar(source, 'isFirefox');
     return removeFunction(source, 'createFunction')
-      .replace(/\n *try *{\s*createFunction[\s\S]+?catch[^}]+}\n/, '');
+      .replace(/createFunction/g, 'Function')
+      .replace(/(?:\s*\/\/.*)*\s*if *\(isIeOpera[^}]+}\n/, '');
   }
 
   /**
@@ -1170,13 +1172,6 @@
         source = removeVar(source, 'cloneableClasses');
         source = removeVar(source, 'ctorByClass');
 
-        // remove unneeded template related variables
-        source = removeVar(source, 'reComplexDelimiter');
-        source = removeVar(source, 'reEmptyStringLeading');
-        source = removeVar(source, 'reEmptyStringMiddle');
-        source = removeVar(source, 'reEmptyStringTrailing');
-        source = removeVar(source, 'reInsertVariable');
-
         // remove large array optimizations
         source = removeFunction(source, 'cachedContains');
         source = removeVar(source, 'largeArraySize');
@@ -1213,7 +1208,7 @@
           source = replaceFunction(source, 'clone', [
             '  function clone(value) {',
             '    return value && objectTypes[typeof value]',
-            '      ? (isArray(value) ? slice.call(value) : assign({}, value))',
+            '      ? (isArray(value) ? slice(value) : assign({}, value))',
             '      : value',
             '  }'
           ].join('\n'));
@@ -1434,6 +1429,14 @@
           '  }'
         ].join('\n'));
 
+        // replace `_.uniqueId`
+        source = replaceFunction(source, 'uniqueId', [
+          '  function uniqueId(prefix) {',
+          '    var id = idCounter++;',
+          '    return prefix ? prefix + id : id;',
+          '  }'
+        ].join('\n'));
+
         // replace `_.without`
         source = replaceFunction(source, 'without', [
           '  function without(array) {',
@@ -1554,7 +1557,7 @@
       /*----------------------------------------------------------------------*/
 
       if (isLegacy) {
-        _.each(['isBindFast', 'nativeBind', 'nativeIsArray', 'nativeKeys'], function(varName) {
+        _.each(['isBindFast', 'isV8', 'nativeBind', 'nativeIsArray', 'nativeKeys', 'reNative'], function(varName) {
           source = removeVar(source, varName);
         });
 
@@ -1586,9 +1589,8 @@
 
           source = removeIsArgumentsFallback(source);
         }
-
-        source = removeVar(source, 'reNative');
         source = removeFromCreateIterator(source, 'nativeKeys');
+        source = removeCreateFunction(source);
       }
 
       /*----------------------------------------------------------------------*/
@@ -1651,9 +1653,11 @@
             });
           });
 
-          // modify `_.every`, `_.find`, and `_.some` to use the private `indicatorObject`
-          source = source.replace(matchFunction(source, 'every'), function(match) {
-            return match.replace(/\(result *= *(.+?)\);/, '!(result = $1) && indicatorObject;');
+          // modify `_.every`, `_.find`, `_.isEqual`, and `_.some` to use the private `indicatorObject`
+          _.each(['every', 'isEqual'], function(methodName) {
+            source = source.replace(matchFunction(source, methodName), function(match) {
+              return match.replace(/\(result *= *(.+?)\);/g, '!(result = $1) && indicatorObject;');
+            });
           });
 
           source = source.replace(matchFunction(source, 'find'), function(match) {
@@ -1666,7 +1670,6 @@
         }
         else {
           source = removeIsArgumentsFallback(source);
-          source = removeVar(source, 'hasObjectSpliceBug');
 
           // remove `hasObjectSpliceBug` fix from the mutator Array functions mixin
           source = source.replace(/(?:\s*\/\/.*)*\n( *)if *\(hasObjectSpliceBug[\s\S]+?\n\1}/, '');
@@ -1681,24 +1684,19 @@
             source = source.replace(matchFunction(source, data.methodName), function(match) {
               return match
                 .replace(/(callback), *thisArg/g, '$1')
-                .replace(/^ *callback *=.+/m, 'callback || (callback = identity);')
+                .replace(/^( *)callback *=.+/m, '$1callback || (callback = identity);')
             });
           }
         });
 
         // remove `hasDontEnumBug`, `iteratesOwnLast`, and `noArgsEnum` declarations and assignments
         source = source
-          .replace(/ *\(function\(\) *{[\s\S]+?}\(1\)\);\n/, '')
+          .replace(/^ *\(function\(\) *{[\s\S]+?}\(1\)\);\n/m, '')
           .replace(/(?:\n +\/\*[^*]*\*+(?:[^\/][^*]*\*+)*\/)?\n *var (?:hasDontEnumBug|iteratesOwnLast|noArgsEnum).+\n/g, '');
 
         // remove `iteratesOwnLast` from `shimIsPlainObject`
         source = source.replace(matchFunction(source, 'shimIsPlainObject'), function(match) {
           return match.replace(/(?:\s*\/\/.*)*\n( *)if *\(iteratesOwnLast[\s\S]+?\n\1}/, '');
-        });
-
-        // remove JScript [[DontEnum]] fix from `_.isEqual`
-        source = source.replace(matchFunction(source, 'isEqual'), function(match) {
-          return match.replace(/(?:\s*\/\/.*)*\n( *)if *\(hasDontEnumBug[\s\S]+?\n\1}/, '');
         });
 
         // remove `noCharByIndex` from `_.reduceRight`
@@ -1708,17 +1706,10 @@
 
         // remove `noCharByIndex` from `_.toArray`
         source = source.replace(matchFunction(source, 'toArray'), function(match) {
-          return match.replace(/(?:\s*\/\/.*)*\n( *)if *\(noCharByIndex[\s\S]+?\n\1}/, '');
+          return match.replace(/noCharByIndex[^:]+:/, '');
         });
 
-        // replace `createFunction` with `Function` in `_.template`
-        source = source.replace(matchFunction(source, 'template'), function(match) {
-          return match.replace(/createFunction/g, 'Function');
-        });
-
-        source = removeVar(source, 'extendIteratorOptions');
         source = removeVar(source, 'iteratorTemplate');
-        source = removeVar(source, 'noCharByIndex');
         source = removeCreateFunction(source);
         source = removeNoArgsClass(source);
         source = removeNoNodeClass(source);
@@ -1825,6 +1816,13 @@
         source = removeIsFunctionFallback(source);
       }
       if (isRemoved(source, 'mixin')) {
+        // simplify the `lodash` function
+        source = replaceFunction(source, 'lodash', [
+          '  function lodash() {',
+          '    // no operation performed',
+          '  }'
+        ].join('\n'));
+
         // remove `lodash.prototype` additions
         source = source.replace(/(?:\s*\/\/.*)*\s*mixin\(lodash\)[\s\S]+?\/\*-+\*\//, '');
         source = removeVar(source, 'hasObjectSpliceBug');
@@ -1858,24 +1856,24 @@
       if (isRemoved(source, 'isArguments', 'isEmpty')) {
         source = removeNoArgsClass(source);
       }
-      if (isRemoved(source, 'clone', 'isEqual', 'shimIsPlainObject')) {
+      if (isRemoved(source, 'clone', 'isEqual', 'isPlainObject')) {
         source = removeNoNodeClass(source);
       }
       if ((source.match(/\bcreateIterator\b/g) || []).length < 2) {
         source = removeFunction(source, 'createIterator');
         source = source.replace(/(?:\n +\/\*[^*]*\*+(?:[^\/][^*]*\*+)*\/)?\n *var noArgsEnum;|.+?noArgsEnum *=.+/g, '');
       }
-      if (isRemoved(source, 'createIterator', 'bind')) {
+      if (isRemoved(source, 'createIterator', 'bind', 'keys', 'template')) {
         source = removeVar(source, 'isBindFast');
         source = removeVar(source, 'nativeBind');
       }
-      if (isRemoved(source, 'createIterator', 'bind', 'isArray', 'isPlainObject', 'keys')) {
+      if (isRemoved(source, 'createIterator', 'bind', 'isArray', 'isPlainObject', 'keys', 'template')) {
         source = removeVar(source, 'reNative');
       }
       if (isRemoved(source, 'createIterator', 'isEqual')) {
         source = source.replace(/(?:\n +\/\*[^*]*\*+(?:[^\/][^*]*\*+)*\/)?\n *var hasDontEnumBug;|.+?hasDontEnumBug *=.+/g, '');
       }
-      if (isRemoved(source, 'createIterator', 'shimIsPlainObject')) {
+      if (isRemoved(source, 'createIterator', 'isPlainObject')) {
         source = source.replace(/(?:\n +\/\*[^*]*\*+(?:[^\/][^*]*\*+)*\/)?\n *var iteratesOwnLast;|.+?iteratesOwnLast *=.+/g, '');
       }
       if (isRemoved(source, 'createIterator', 'keys')) {
