@@ -87,7 +87,7 @@
     'find': ['forEach'],
     'first': [],
     'flatten': ['isArray'],
-    'forEach': ['identity', 'isString'],
+    'forEach': ['identity', 'isArguments', 'isString'],
     'forIn': ['identity', 'isArguments'],
     'forOwn': ['identity', 'isArguments'],
     'functions': ['forIn', 'isFunction'],
@@ -105,7 +105,7 @@
     'isDate': [],
     'isElement': [],
     'isEmpty': ['forOwn', 'isArguments', 'isFunction'],
-    'isEqual': ['forIn', 'isFunction'],
+    'isEqual': ['forIn', 'isArguments', 'isFunction'],
     'isFinite': [],
     'isFunction': [],
     'isNaN': ['isNumber'],
@@ -124,7 +124,7 @@
     'memoize': [],
     'merge': ['forOwn', 'isArray', 'isPlainObject'],
     'min': ['forEach', 'isArray', 'isString'],
-    'mixin': ['filter', 'forEach', 'functions'],
+    'mixin': ['forEach', 'forOwn', 'functions'],
     'noConflict': [],
     'object': [],
     'omit': ['forIn', 'indexOf'],
@@ -135,7 +135,7 @@
     'pluck': ['map'],
     'random': [],
     'range': [],
-    'reduce': ['forEach'],
+    'reduce': ['forEach', 'isArray'],
     'reduceRight': ['forEach', 'isString', 'keys'],
     'reject': ['filter'],
     'rest': [],
@@ -366,6 +366,8 @@
       .replace(/(?:(?:\s*\/\/.*)*\s*lodash\._[^=]+=.+\n)+/g, '\n')
       // remove lines with just whitespace and semicolons
       .replace(/^ *;\n/gm, '')
+      // consolidate multiple newlines
+      .replace(/\n{3,}/g, '\n\n')
       // consolidate consecutive horizontal rule comment separators
       .replace(/(?:\s*\/\*-+\*\/\s*){2,}/g, function(separators) {
         return separators.match(/^\s*/)[0] + separators.slice(separators.lastIndexOf('/*'));
@@ -439,7 +441,7 @@
    * @returns {String} Returns the method assignments snippet.
    */
   function getMethodAssignments(source) {
-    return (source.match(/lodash\.VERSION *= *[\s\S]+?\/\*-+\*\/\n/) || [''])[0];
+    return (source.match(/\/\*-+\*\/\n(?:\s*\/\/.*)*\s*lodash\.\w+ *=[\s\S]+?lodash\.VERSION *=.+/) || [''])[0];
   }
 
   /**
@@ -759,6 +761,11 @@
       return match.replace(/ *\|\| *\(noArgsClass *&&[^)]+?\)\)/g, '');
     });
 
+    // remove `noArgsClass` from `_.isEqual`
+    source = source.replace(matchFunction(source, 'isEqual'), function(match) {
+      return match.replace(/noArgsClass[^:]+:\s*/g, '');
+    });
+
     return source;
   }
 
@@ -836,7 +843,7 @@
       // clip snippet after the JSDoc comment block
       match = match.replace(/^\s*(?:\/\/.*|\/\*[^*]*\*+(?:[^\/][^*]*\*+)*\/)\n/, '');
       source = source.replace(match, function() {
-        return funcValue;
+        return funcValue.trimRight() + '\n';
       });
     }
     return source;
@@ -1308,13 +1315,6 @@
           '  }'
         ].join('\n'));
 
-        // replace `_.isFinite`
-        source = replaceFunction(source, 'isFinite', [
-          '  function isFinite(value) {',
-          '    return nativeIsFinite(value) && toString.call(value) == numberClass;',
-          '  }'
-        ].join('\n'));
-
         // replace `_.omit`
         source = replaceFunction(source, 'omit', [
           '  function omit(object) {',
@@ -1407,6 +1407,11 @@
           '        result = [],',
           '        seen = result;',
           '',
+          "    if (typeof isSorted == 'function') {",
+          '      thisArg = callback;',
+          '      callback = isSorted;',
+          '      isSorted = false;',
+          '    }',
           '    if (callback) {',
           '      seen = [];',
           '      callback = createCallback(callback, thisArg);',
@@ -1432,7 +1437,7 @@
         // replace `_.uniqueId`
         source = replaceFunction(source, 'uniqueId', [
           '  function uniqueId(prefix) {',
-          '    var id = idCounter++;',
+          "    var id = ++idCounter + '';",
           '    return prefix ? prefix + id : id;',
           '  }'
         ].join('\n'));
@@ -1462,17 +1467,22 @@
           '  }'
         ].join('\n'));
 
-        // add `__chain__` checks to `_.mixin` and Array function wrappers
-        source = source.replace(/^( *)forEach\([\s\S]+?\n\1}.+/gm, function(match) {
-          return match.replace(/^( *)return new lodash\(([^)]+)\).+/m, function(submatch, indent, varName) {
-            return indent + [
-              'if (this.__chain__) {',
-              '  varName = new lodash(varName);',
-              '  varName.__chain__ = true;',
-              '}',
-              'return varName;'
-            ].join('\n' + indent)
-            .replace(/varName/g, varName);
+        // add `__chain__` checks to `_.mixin` and `Array` function wrappers
+        _.each([
+          matchFunction(source, 'mixin'),
+          /(?:\s*\/\/.*)*\n( *)forEach\(\['[\s\S]+?\n\1}.+/g
+        ], function(pattern) {
+          source = source.replace(pattern, function(match) {
+            return match.replace(/( *)return new lodash\(([^)]+)\).+/, function(submatch, indent, varName) {
+              return indent + [
+                'if (this.__chain__) {',
+                '  varName = new lodash(varName);',
+                '  varName.__chain__ = true;',
+                '}',
+                'return varName;'
+              ].join('\n' + indent)
+              .replace(/varName/g, varName);
+            });
           });
         });
 
@@ -1489,12 +1499,21 @@
         });
 
         // remove `lodash.prototype.toString` and `lodash.prototype.valueOf` assignments
-        source = source.replace(/ *lodash\.prototype\.(?:toString|valueOf) *=.+\n/g, '');
+        source = source.replace(/^ *lodash\.prototype\.(?:toString|valueOf) *=.+\n/gm, '');
 
         // remove `lodash.prototype` batch method assignments
-        source = source
-          .replace(/(?:\s*\/\/.*)*\n( *)forEach\(\['first'[\s\S]+?\n\1}.+/, '')
-          .replace(/(?:\s*\/\/.*)*\n( *)forEach\(filter[\s\S]+?lodash\.[\s\S]+?\n\1}.+/, '');
+        source = source.replace(/(?:\s*\/\/.*)*\n( *)forOwn\(lodash, *function\(func, *methodName\)[\s\S]+?\n\1}.+/g, '');
+
+        // move `mixin(lodash)` to after the method assignments
+        source = source.replace(/(?:\s*\/\/.*)*\s*mixin\(lodash\).+/, '');
+        source = source.replace(getMethodAssignments(source), function(match) {
+          return match + [
+            '',
+            '',
+            '  // add functions to `lodash.prototype`',
+            '  mixin(lodash);'
+          ].join('\n');
+        });
 
         // remove unused features from `createBound`
         if (buildMethods.indexOf('partial') == -1) {
@@ -1614,23 +1633,23 @@
                 modified = snippet;
 
             if (!exposeAssign) {
-              modified = modified.replace(/(?:\n *\/\/.*\s*)* *lodash\.assign *= *.+\n/, '');
+              modified = modified.replace(/^(?: *\/\/.*\s*)* *lodash\.assign *= *.+\n/m, '');
             }
             if (!exposeForIn) {
-              modified = modified.replace(/(?:\n *\/\/.*\s*)* *lodash\.forIn *= *.+\n/, '');
+              modified = modified.replace(/^(?: *\/\/.*\s*)* *lodash\.forIn *= *.+\n/m, '');
             }
             if (!exposeForOwn) {
-              modified = modified.replace(/(?:\n *\/\/.*\s*)* *lodash\.forOwn *= *.+\n/, '');
+              modified = modified.replace(/^(?: *\/\/.*\s*)* *lodash\.forOwn *= *.+\n/m, '');
             }
             if (!exposeIsPlainObject) {
-              modified = modified.replace(/(?:\n *\/\/.*\s*)* *lodash\.isPlainObject *= *.+\n/, '');
+              modified = modified.replace(/^(?: *\/\/.*\s*)* *lodash\.isPlainObject *= *.+\n/m, '');
             }
             source = source.replace(snippet, modified);
           }());
 
           // replace `isArguments` and its fallback
           (function() {
-            var snippet = matchFunction(source, 'isArguments');
+            var snippet = matchFunction(source, 'isArguments').trimRight();
             snippet = snippet.replace(/function isArguments/, 'lodash.isArguments = function');
 
             source = removeFunction(source, 'isArguments');
@@ -1816,6 +1835,8 @@
         source = removeIsFunctionFallback(source);
       }
       if (isRemoved(source, 'mixin')) {
+        source = removeVar(source, 'hasObjectSpliceBug');
+
         // simplify the `lodash` function
         source = replaceFunction(source, 'lodash', [
           '  function lodash() {',
@@ -1823,17 +1844,17 @@
           '  }'
         ].join('\n'));
 
-        // remove `lodash.prototype` additions
-        source = source.replace(/(?:\s*\/\/.*)*\s*mixin\(lodash\)[\s\S]+?\/\*-+\*\//, '');
-        source = removeVar(source, 'hasObjectSpliceBug');
+        // remove all `lodash.prototype` additions
+        source = source
+          .replace(/(?:\s*\/\/.*)*\n( *)forOwn\(lodash, *function\(func, *methodName\)[\s\S]+?\n\1}.+/g, '')
+          .replace(/(?:\s*\/\/.*)*\n( *)forEach\(\['[\s\S]+?\n\1}.+/g, '')
+          .replace(/(?:\s*\/\/.*)*\s*mixin\(lodash\).+\n/, '')
+          .replace(/(?:\s*\/\/.*)*\s*lodash\.prototype.+\n/, '');
       }
-
-      // remove pseudo private properties
-      source = source.replace(/(?:(?:\s*\/\/.*)*\s*lodash\._[^=]+=.+\n)+/g, '\n');
 
       // assign debug source before further modifications that rely on the minifier
       // to remove unused variables and other dead code
-      debugSource = source;
+      debugSource = cleanupSource(source);
 
       // remove associated functions, variables, and code snippets that the minifier may miss
       if (isRemoved(source, 'clone')) {
@@ -1885,6 +1906,8 @@
         source = source.replace(/ *\(function\(\) *{[\s\S]+?}\(1\)\);\n/, '');
       }
     }
+
+    source = cleanupSource(source);
 
     /*------------------------------------------------------------------------*/
 

@@ -210,12 +210,11 @@
       deepEqual(args, ['a', ['b'], 'c']);
     });
 
-    test('ensure `new bound` is an instance of `bound` and `func`', function() {
+    test('ensure `new bound` is an instance of `func`', function() {
       var func = function() {},
-          bound = _.bind(func, {}),
-          instance = new bound;
+          bound = _.bind(func, {});
 
-      ok(instance instanceof bound && instance instanceof func);
+      ok(new bound instanceof func);
     });
   }());
 
@@ -1742,22 +1741,10 @@
 
   (function() {
     test('subsequent calls should return the result of the first call', function() {
-      var throttled = _.throttle(function(value) { return value; }, 90),
+      var throttled = _.throttle(function(value) { return value; }, 32),
           result = [throttled('x'), throttled('y')];
 
       deepEqual(result, ['x', 'x']);
-    });
-
-    test('supports calls in a loop', function() {
-      var counter = 0,
-          throttled = _.throttle(function() { counter++; }, 90),
-          start = new Date,
-          limit = 180;
-
-      while ((new Date - start) < limit) {
-        throttled();
-      }
-      ok(counter > 1);
     });
 
     asyncTest('supports recursive calls', function() {
@@ -1800,6 +1787,43 @@
         ok(actual);
         QUnit.start();
       }, 260);
+    });
+
+    asyncTest('should not trigger a trailing call when invoked once', function() {
+      var counter = 0,
+          throttled = _.throttle(function() { counter++; }, 32);
+
+      throttled();
+      equal(counter, 1);
+
+      setTimeout(function() {
+        equal(counter, 1);
+        QUnit.start();
+      }, 64);
+    });
+
+    asyncTest('should trigger trailing call when invoked repeatedly', function() {
+      var actual,
+          counter = 0,
+          limit = 80,
+          throttled = _.throttle(function() { counter++; }, 32),
+          start = new Date;
+
+      while ((new Date - start) < limit) {
+        throttled();
+      }
+      setTimeout(function() {
+        actual = counter + 2;
+        throttled();
+        throttled();
+      }, 64);
+
+      setTimeout(function() {
+        equal(counter, actual);
+        QUnit.start();
+      }, 128);
+
+      ok(counter > 1);
     });
   }());
 

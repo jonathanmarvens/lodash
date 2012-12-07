@@ -1,4 +1,4 @@
-//     Underscore.js 1.4.2
+//     Underscore.js 1.4.3
 //     http://underscorejs.org
 //     (c) 2009-2012 Jeremy Ashkenas, DocumentCloud Inc.
 //     Underscore may be freely distributed under the MIT license.
@@ -24,7 +24,6 @@
   var push             = ArrayProto.push,
       slice            = ArrayProto.slice,
       concat           = ArrayProto.concat,
-      unshift          = ArrayProto.unshift,
       toString         = ObjProto.toString,
       hasOwnProperty   = ObjProto.hasOwnProperty;
 
@@ -65,7 +64,7 @@
   }
 
   // Current version.
-  _.VERSION = '1.4.2';
+  _.VERSION = '1.4.3';
 
   // Collection Functions
   // --------------------
@@ -102,6 +101,8 @@
     return results;
   };
 
+  var reduceError = 'Reduce of empty array with no initial value';
+
   // **Reduce** builds up a single result from a list of values, aka `inject`,
   // or `foldl`. Delegates to **ECMAScript 5**'s native `reduce` if available.
   _.reduce = _.foldl = _.inject = function(obj, iterator, memo, context) {
@@ -119,7 +120,7 @@
         memo = iterator.call(context, memo, value, index, list);
       }
     });
-    if (!initial) throw new TypeError('Reduce of empty array with no initial value');
+    if (!initial) throw new TypeError(reduceError);
     return memo;
   };
 
@@ -146,7 +147,7 @@
         memo = iterator.call(context, memo, obj[index], index, list);
       }
     });
-    if (!initial) throw new TypeError('Reduce of empty array with no initial value');
+    if (!initial) throw new TypeError(reduceError);
     return memo;
   };
 
@@ -239,7 +240,7 @@
     if (_.isEmpty(attrs)) return [];
     return _.filter(obj, function(value) {
       for (var key in attrs) {
-        if (_.has(attrs, key) && attrs[key] !== value[key]) return false;
+        if (attrs[key] !== value[key]) return false;
       }
       return true;
     });
@@ -336,7 +337,7 @@
   // either a string attribute to count by, or a function that returns the
   // criterion.
   _.countBy = function(obj, value, context) {
-    return group(obj, value, context, function(result, key, value) {
+    return group(obj, value, context, function(result, key) {
       if (!_.has(result, key)) result[key] = 0;
       result[key]++;
     });
@@ -573,22 +574,20 @@
   // optionally). Binding with arguments is also known as `curry`.
   // Delegates to **ECMAScript 5**'s native `Function.bind` if available.
   // We check for `func.bind` first, to fail fast when `func` is undefined.
-  _.bind = function bind(func, context) {
+  _.bind = function(func, context) {
+    var args, bound;
     if (func.bind === nativeBind && nativeBind) return nativeBind.apply(func, slice.call(arguments, 1));
     if (!_.isFunction(func)) throw new TypeError;
-    var args = slice.call(arguments, 2);
-    var bound = function() {
+    args = slice.call(arguments, 2);
+    return bound = function() {
       if (!(this instanceof bound)) return func.apply(context, args.concat(slice.call(arguments)));
-      var result = func.apply(this, args.concat(slice.call(arguments)));
-      if (Object(result) === result) return result;
-      return this;
-    };
-    if (func && func.prototype) {
       ctor.prototype = func.prototype;
-      bound.prototype = new ctor;
+      var self = new ctor;
       ctor.prototype = null;
-    }
-    return bound;
+      var result = func.apply(self, args.concat(slice.call(arguments)));
+      if (Object(result) === result) return result;
+      return self;
+    };
   };
 
   // Bind all of an object's methods to that object. Useful for ensuring that
@@ -640,6 +639,7 @@
       args = arguments;
       if (remaining <= 0) {
         clearTimeout(timeout);
+        timeout = null;
         previous = now;
         result = func.apply(context, args);
       } else if (!timeout) {
@@ -962,7 +962,7 @@
 
   // Is a given object a finite number?
   _.isFinite = function(obj) {
-    return isFinite( obj ) && !isNaN( parseFloat(obj) );
+    return isFinite(obj) && !isNaN(parseFloat(obj));
   };
 
   // Is the given value `NaN`? (NaN is the only number which does not equal itself).
@@ -1075,7 +1075,7 @@
   // Useful for temporary DOM ids.
   var idCounter = 0;
   _.uniqueId = function(prefix) {
-    var id = idCounter++;
+    var id = '' + ++idCounter;
     return prefix ? prefix + id : id;
   };
 

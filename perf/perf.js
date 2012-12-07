@@ -1600,7 +1600,7 @@
   /*--------------------------------------------------------------------------*/
 
   suites.push(
-    Benchmark.Suite('`_.toArray` with an array')
+    Benchmark.Suite('`_.toArray` with an array (edge case)')
       .add(buildName, '\
         lodash.toArray(numbers)'
       )
@@ -1629,6 +1629,42 @@
       .add(otherName, '\
         _.union(numbers, fourNumbers, twoNumbers)'
       )
+  );
+
+  suites.push(
+    Benchmark.Suite('`_.union` iterating an array of 50 elements')
+      .add(buildName, {
+        'fn': 'lodash.union(twentyFiveValues, twentyFiveValues2);',
+        'teardown': 'function multiArrays(){}'
+      })
+      .add(otherName, {
+        'fn': '_.union(twentyFiveValues, twentyFiveValues2);',
+        'teardown': 'function multiArrays(){}'
+      })
+  );
+
+  suites.push(
+    Benchmark.Suite('`_.union` iterating an array of 75 elements')
+      .add(buildName, {
+        'fn': 'lodash.union(fiftyValues, twentyFiveValues2);',
+        'teardown': 'function multiArrays(){}'
+      })
+      .add(otherName, {
+        'fn': '_.union(fiftyValues, twentyFiveValues2);',
+        'teardown': 'function multiArrays(){}'
+      })
+  );
+
+  suites.push(
+    Benchmark.Suite('`_.union` iterating an array of 100 elements')
+      .add(buildName, {
+        'fn': 'lodash.union(seventyFiveValues, twentyFiveValues2);',
+        'teardown': 'function multiArrays(){}'
+      })
+      .add(otherName, {
+        'fn': '_.union(seventyFiveValues, twentyFiveValues2);',
+        'teardown': 'function multiArrays(){}'
+      })
   );
 
   /*--------------------------------------------------------------------------*/
